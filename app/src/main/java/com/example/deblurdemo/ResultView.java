@@ -51,13 +51,13 @@ public class ResultView extends View {
         mPaintRectangle.setStyle(Paint.Style.FILL_AND_STROKE);
         for (int i = 0; i < m_w_patchnum * m_h_patchnum; i ++) {
             switch (m_level_list[i]) {
-                case 0:
+                case 2:
                     mPaintRectangle.setColor(Color.argb(128, 255, 255, 0));
                     break;
                 case 1:
                     mPaintRectangle.setColor(Color.argb(128, 255, 165, 0));
                     break;
-                case 2:
+                case 0:
                     mPaintRectangle.setColor(Color.argb(128, 255, 0, 0));
                     break;
                 default:

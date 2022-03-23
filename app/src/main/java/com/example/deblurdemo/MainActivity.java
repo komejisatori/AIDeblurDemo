@@ -52,6 +52,8 @@ public class MainActivity extends AppCompatActivity implements Runnable{
     final private int mImage_w_patchnum = 3;
     final private int mImage_h_patchnum = 5;
 
+    private int mMockedLevel = 0;
+
     private float[] mImageBuffer = new float[3 * mImageView_w * mImageView_h];
     private float[] mLinearGrad_h = new float[mImage_h_overlap];
     private float[] mLinearGrad_w = new float[mImage_w_overlap];
@@ -64,6 +66,7 @@ public class MainActivity extends AppCompatActivity implements Runnable{
     private Button mCamera;
     private Button mDeblur;
     private Button mGrid;
+    private Button mMock;
     private ProcessView mProcessViewer;
     private ResultView mResultViewer;
 
@@ -72,7 +75,24 @@ public class MainActivity extends AppCompatActivity implements Runnable{
     private String mCurrentPhotoPath = "blur.png";
     private String mDeblurPhotoPath = "sharp.png";
 
+    final private String mJudgerNetPath = "uxjudge.ptl";
+    final private String mNetdep1Path = "uxdep_1.ptl";
+    final private String mNetdep2Path = "uxdep_2.ptl";
+    final private String mNetdep3Path = "uxdep_3.ptl";
+    final private String mNetdep4Path = "uxdep_4.ptl";
+    final private String mNetdep5Path = "uxdep_5.ptl";
+    final private String mNetdep6Path = "uxdep_6.ptl";
+
+
     private Module mModule = null;
+
+    private Module mBlurJudger = null;
+    private Module mModule_1 = null;
+    private Module mModule_2 = null;
+    private Module mModule_3 = null;
+    private Module mModule_4 = null;
+    private Module mModule_5 = null;
+    private Module mModule_6 = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -138,6 +158,18 @@ public class MainActivity extends AppCompatActivity implements Runnable{
             public void onClick(View view) {
                 Intent pickPhoto = new Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.INTERNAL_CONTENT_URI);
                 startActivityForResult(pickPhoto, 1);
+            }
+        });
+
+        mMock = findViewById(R.id.mMock);
+        mMock.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+
+                mMockedLevel += 1;
+                if (mMockedLevel > 2){
+                    mMockedLevel = 0;
+                }
+                mMock.setText(String.valueOf(mMockedLevel));
             }
         });
 
@@ -231,7 +263,15 @@ public class MainActivity extends AppCompatActivity implements Runnable{
         });
 
         try {
-            mModule = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), "denoise.ptl"));
+            // mModule = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), "unet.ptl"));
+            mBlurJudger = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), mJudgerNetPath));
+            mModule_1 = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), mNetdep1Path));
+            mModule_2 = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), mNetdep2Path));
+            mModule_3 = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), mNetdep3Path));
+            mModule_4 = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), mNetdep4Path));
+            mModule_5 = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), mNetdep5Path));
+            mModule_6 = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), mNetdep6Path));
+
         } catch (IOException e) {
             Log.e("Deblur Demo", "Error reading assets", e);
             finish();
@@ -255,6 +295,7 @@ public class MainActivity extends AppCompatActivity implements Runnable{
                             //matrix.postRotate(90.0f);
                             mBitmap = Bitmap.createBitmap(mBitmap, 0, 0, mBitmap.getWidth(), mBitmap.getHeight(), matrix, true);
                             mImageView.setImageBitmap(mBitmap);
+
                             Thread thread = new Thread(MainActivity.this);
                             thread.start();
 
@@ -364,13 +405,61 @@ public class MainActivity extends AppCompatActivity implements Runnable{
                 int start_h = h_index * (mImagePatchSize - mImage_h_overlap);
                 int start_w = w_index * (mImagePatchSize - mImage_w_overlap);
 
-                Tensor inputPatch = TensorImageUtils.bitmapToFloat32Tensor(mBitmap, start_w, start_h, mImagePatchSize, mImagePatchSize, new float[] {0.0f, 0.0f, 0.0f}, new float[] {1.0f, 1.0f, 1.0f});
+                final IValue inputPatch = IValue.from(
+                        TensorImageUtils.bitmapToFloat32Tensor(mBitmap, start_w, start_h, mImagePatchSize, mImagePatchSize, new float[] {0.0f, 0.0f, 0.0f}, new float[] {1.0f, 1.0f, 1.0f})
+                );
+                int maxScoreIdx = mMockedLevel;
 
                 // level network forward
-                mImageLevel[image_count] = new Random().nextInt(3);
+                final Tensor judgeTensor = mBlurJudger.forward(inputPatch).toTensor();
+                final float[] scores = judgeTensor.getDataAsFloatArray();
 
-                final Tensor outTensor = mModule.forward(IValue.from(inputPatch)).toTensor();
-                final float[] outputs = outTensor.getDataAsFloatArray();
+                // searching for the index with maximum score
+                float maxScore = -Float.MAX_VALUE;
+
+                for (int i = 0; i < scores.length; i++) {
+                    if (scores[i] > maxScore) {
+                        maxScore = scores[i];
+                        maxScoreIdx = i;
+                    }
+                }
+
+                // maxScoreIdx = mMockedLevel; // mock one
+
+                mImageLevel[image_count] = maxScoreIdx;
+                // ----------------------
+
+                // common encoder forward
+                IValue[] outputTuple = mModule_1.forward(inputPatch).toTuple();
+                final IValue x1Tensor = outputTuple[0];
+                final IValue x2Tensor = outputTuple[1];
+                final IValue x3Tensor = outputTuple[2];
+                IValue x4Tensor = null;
+                IValue x5Tensor = null;
+
+                IValue output = null;
+                // ----------------------
+
+                switch (maxScoreIdx) {
+                    case 2:
+                        output = mModule_4.forward(x3Tensor, x2Tensor, x1Tensor, inputPatch);
+                        break;
+                    case 1:
+                        x4Tensor = mModule_2.forward(x3Tensor);
+                        output = mModule_5.forward(x4Tensor, x3Tensor, x2Tensor, x1Tensor, inputPatch);
+                        break;
+                    case 0:
+                        x4Tensor = mModule_2.forward(x3Tensor);
+                        x5Tensor = mModule_3.forward(x4Tensor);
+                        output = mModule_6.forward(x5Tensor, x4Tensor, x3Tensor, x2Tensor, x1Tensor, inputPatch);
+                        break;
+                }
+
+                // IValue output = mModule.forward(inputPatch);
+
+                final float[] outputs = output.toTensor().getDataAsFloatArray();
+
+                // final float[] outputs = inputPatch.toTensor().getDataAsFloatArray();
                 int patch_count = 0;
                 for (int i_h_index = start_h; i_h_index < start_h + mImagePatchSize; i_h_index ++) {
                     for (int i_w_index = start_w; i_w_index < start_w + mImagePatchSize; i_w_index++) {
@@ -382,6 +471,8 @@ public class MainActivity extends AppCompatActivity implements Runnable{
                         float r = outputs[patch_count];
                         float g = outputs[patch_count + mImagePatchSize*mImagePatchSize];
                         float b = outputs[patch_count + 2 * mImagePatchSize*mImagePatchSize];
+
+
                         if (p_w_index < mImage_w_overlap && l_grad) {
                             r = r * mLinearGrad_w[p_w_index];
                             g = g * mLinearGrad_w[p_w_index];
@@ -438,17 +529,19 @@ public class MainActivity extends AppCompatActivity implements Runnable{
 
         for (int i = 0; i < mImageView_w * mImageView_h; i++){
 
+            double r = (floatArray[i] < 0.0 ? 0.0 : floatArray[i]);
+            byte br = (byte)(int)((Math.min(r, 1.0)) * 255);
+
+            double g = (floatArray[i+mImageView_w*mImageView_h] < 0.0 ? 0.0 : floatArray[i+mImageView_w*mImageView_h]);
+            byte bg = (byte)(int)((Math.min(g, 1.0)) * 255);
+
+            double b = (floatArray[i+2*mImageView_w*mImageView_h] < 0.0 ? 0.0 : floatArray[i+2*mImageView_w*mImageView_h]);
+            byte bb = (byte)(int)((Math.min(b, 1.0)) * 255);
 
 
-            byteBuffer.put(i * 4 + 0, (byte)(int)(
-                    (floatArray[i] > 1.0 ? 1.0 : floatArray[i]) * 255)
-            );//(int)();
-            byteBuffer.put(i * 4 + 1, (byte)(int)(
-                    (floatArray[i+mImageView_w*mImageView_h] > 1.0 ? 1.0 : floatArray[i+mImageView_w*mImageView_h]) * 255)
-            );//(int)(floatArray[i+mImageView_w*mImageView_h] * 255);
-            byteBuffer.put(i * 4 + 2, (byte)(int)(
-                    (floatArray[i+2*mImageView_w*mImageView_h] > 1.0 ? 1.0 : floatArray[i+2*mImageView_w*mImageView_h]) * 255)
-            ); //(int)(floatArray[i+2*mImageView_w*mImageView_h] * 255);
+            byteBuffer.put(i * 4 + 0, br);//(int)();
+            byteBuffer.put(i * 4 + 1, bg);//(int)(floatArray[i+mImageView_w*mImageView_h] * 255);
+            byteBuffer.put(i * 4 + 2, bb); //(int)(floatArray[i+2*mImageView_w*mImageView_h] * 255);
             byteBuffer.put(i * 4 + 3, (byte)(int)(-1));
         }
         bmp.copyPixelsFromBuffer(byteBuffer);
