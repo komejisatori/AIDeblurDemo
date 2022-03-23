@@ -31,27 +31,42 @@ import org.pytorch.Module;
 import org.pytorch.Tensor;
 import org.pytorch.torchvision.TensorImageUtils;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
+import java.util.Random;
 
 public class MainActivity extends AppCompatActivity implements Runnable{
 
     private ImageView mImageView;
-    private int mImageView_h = 1280;
-    private int mImageView_w = 720;
+    final private int mImageView_h = 1280;
+    final private int mImageView_w = 720;
+
+    final private int mImagePatchSize = 272;
+    final private int mImage_w_overlap = 48;
+    final private int mImage_h_overlap = 20;
+    final private int mImage_w_patchnum = 3;
+    final private int mImage_h_patchnum = 5;
+
+    private float[] mImageBuffer = new float[3 * mImageView_w * mImageView_h];
+    private float[] mLinearGrad_h = new float[mImage_h_overlap];
+    private float[] mLinearGrad_w = new float[mImage_w_overlap];
+    private int[] mImageLevel = new int[mImage_h_patchnum * mImage_w_patchnum];
+
+    //private FloatBuffer mPatchBuffer = Tensor.allocateFloatBuffer(3 * mImagePatchSize * mImagePatchSize);
+
     private ProgressBar mProgressbar;
     private Button mGallery;
     private Button mCamera;
     private Button mDeblur;
+    private Button mGrid;
+    private ProcessView mProcessViewer;
+    private ResultView mResultViewer;
+
     private Bitmap mBitmap = null;
     private Bitmap mDeblurBitmap = null;
     private String mCurrentPhotoPath = "blur.png";
@@ -69,6 +84,17 @@ public class MainActivity extends AppCompatActivity implements Runnable{
         builder.detectFileUriExposure();
 
         askPermissions();
+
+        for (int grad_index = 0; grad_index < mImage_h_overlap; grad_index ++){
+            mLinearGrad_h[grad_index] = 1.0f / (mImage_h_overlap - 1) * grad_index;
+        }
+        for (int grad_index = 0; grad_index < mImage_w_overlap; grad_index ++){
+            mLinearGrad_w[grad_index] = 1.0f / (mImage_w_overlap - 1) * grad_index;
+        }
+        for (int grad_index = 0; grad_index < mImage_h_patchnum * mImage_w_patchnum; grad_index ++){
+            mImageLevel[grad_index] = 0;
+        }
+
 
         try {
             mBitmap = BitmapFactory.decodeStream(getAssets().open(mCurrentPhotoPath));
@@ -93,6 +119,19 @@ public class MainActivity extends AppCompatActivity implements Runnable{
 
         // mImageView.setImageBitmap(mBitmap);
         mProgressbar = findViewById(R.id.mProgress);
+        mProcessViewer = findViewById(R.id.mProcessView);
+        mResultViewer = findViewById(R.id.mResultView);
+
+        mProcessViewer.setGrids(
+                mImage_h_patchnum, mImage_w_patchnum, mImageView_h, mImageView_w,
+                mImage_h_overlap, mImage_w_overlap, mImagePatchSize
+        );
+        mProcessViewer.setVisibility(View.INVISIBLE);
+        mResultViewer.setGrids(
+                mImage_h_patchnum, mImage_w_patchnum, mImageView_h, mImageView_w,
+                mImage_h_overlap, mImage_w_overlap, mImagePatchSize
+        );
+        mResultViewer.setVisibility(View.INVISIBLE);
 
         mGallery = findViewById(R.id.mGallery);
         mGallery.setOnClickListener(new View.OnClickListener() {
@@ -100,6 +139,33 @@ public class MainActivity extends AppCompatActivity implements Runnable{
                 Intent pickPhoto = new Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.INTERNAL_CONTENT_URI);
                 startActivityForResult(pickPhoto, 1);
             }
+        });
+
+        mGrid = findViewById(R.id.mGrid);
+        mGrid.setOnTouchListener(new View.OnTouchListener() {
+             public boolean onTouch(View view, MotionEvent event) {
+                 switch (event.getAction()) {
+                     case MotionEvent.ACTION_DOWN:
+                         try {
+                             mResultViewer.setResults(mImageLevel);
+                             mResultViewer.invalidate();
+                             mResultViewer.setVisibility(View.VISIBLE);
+                         } catch (Exception e) {
+                             e.printStackTrace();
+                         }
+                         break;
+                     case MotionEvent.ACTION_MOVE:
+                         break;
+                     case MotionEvent.ACTION_UP:
+                         try {
+                             mResultViewer.setVisibility(View.INVISIBLE);
+                         } catch (Exception e) {
+                             e.printStackTrace();
+                         }
+                         break;
+                 }
+                 return true;
+             }
         });
 
         mDeblur = findViewById(R.id.mDeblur);
@@ -270,18 +336,99 @@ public class MainActivity extends AppCompatActivity implements Runnable{
             mProgressbar.setVisibility(ProgressBar.VISIBLE);
         });
 
+        for(int buffer_index = 0; buffer_index < 3 * mImageView_w * mImageView_h; buffer_index ++){
+            mImageBuffer[buffer_index] = 0.0f;
+        }
+        // img split
+        boolean l_grad = false;
+        boolean r_grad = false;
+        boolean t_grad = false;
+        boolean b_grad = false;
+        int image_count = 0;
+        for (int w_index = 0; w_index < mImage_w_patchnum; w_index ++){
+            for (int h_index = 0; h_index < mImage_h_patchnum; h_index ++){
+
+                mProcessViewer.setResult(h_index, w_index, -1);
+                runOnUiThread(() -> {
+                    mProcessViewer.invalidate();
+                    mProcessViewer.setVisibility(View.VISIBLE);
+                });
+                if(w_index == 0){ l_grad = false;r_grad = true; }
+                else if (w_index == mImage_w_patchnum - 1){ l_grad = true;r_grad = false; }
+                else{ l_grad = true;r_grad = true; }
+
+                if(h_index == 0){t_grad = false;b_grad = true; }
+                else if (h_index == mImage_h_patchnum - 1){ t_grad = true;b_grad = false; }
+                else{t_grad = true;b_grad = true; }
+
+                int start_h = h_index * (mImagePatchSize - mImage_h_overlap);
+                int start_w = w_index * (mImagePatchSize - mImage_w_overlap);
+
+                Tensor inputPatch = TensorImageUtils.bitmapToFloat32Tensor(mBitmap, start_w, start_h, mImagePatchSize, mImagePatchSize, new float[] {0.0f, 0.0f, 0.0f}, new float[] {1.0f, 1.0f, 1.0f});
+
+                // level network forward
+                mImageLevel[image_count] = new Random().nextInt(3);
+
+                final Tensor outTensor = mModule.forward(IValue.from(inputPatch)).toTensor();
+                final float[] outputs = outTensor.getDataAsFloatArray();
+                int patch_count = 0;
+                for (int i_h_index = start_h; i_h_index < start_h + mImagePatchSize; i_h_index ++) {
+                    for (int i_w_index = start_w; i_w_index < start_w + mImagePatchSize; i_w_index++) {
+                        int image_index = i_h_index * mImageView_w + i_w_index;
+
+                        int p_w_index = patch_count % mImagePatchSize;
+                        int p_h_index = patch_count / mImagePatchSize;
+
+                        float r = outputs[patch_count];
+                        float g = outputs[patch_count + mImagePatchSize*mImagePatchSize];
+                        float b = outputs[patch_count + 2 * mImagePatchSize*mImagePatchSize];
+                        if (p_w_index < mImage_w_overlap && l_grad) {
+                            r = r * mLinearGrad_w[p_w_index];
+                            g = g * mLinearGrad_w[p_w_index];
+                            b = b * mLinearGrad_w[p_w_index];
+                        }
+                        if (p_w_index >= mImagePatchSize - mImage_w_overlap && r_grad) {
+                            r = r * (mLinearGrad_w[mImagePatchSize - p_w_index - 1]);
+                            g = g * (mLinearGrad_w[mImagePatchSize - p_w_index - 1]);
+                            b = b * (mLinearGrad_w[mImagePatchSize - p_w_index - 1]);
+                        }
+                        if (p_h_index < mImage_h_overlap && t_grad) {
+                            r = r * mLinearGrad_h[p_h_index];
+                            g = g * mLinearGrad_h[p_h_index];
+                            b = b * mLinearGrad_h[p_h_index];
+                        }
+                        if (p_h_index >= mImagePatchSize - mImage_h_overlap && b_grad) {
+                            r = r * mLinearGrad_h[mImagePatchSize - p_h_index - 1];
+                            g = g * mLinearGrad_h[mImagePatchSize - p_h_index - 1];
+                            b = b * mLinearGrad_h[mImagePatchSize - p_h_index - 1];
+                        }
+
+                        mImageBuffer[image_index] += r;
+                        mImageBuffer[image_index + mImageView_h * mImageView_w] += g;
+                        mImageBuffer[image_index + 2 * mImageView_h * mImageView_w] += b;
+
+                        patch_count ++;
+                    }
+                }
+                image_count ++;
+            }
+        }
+        mDeblurBitmap = floatArrayToGrayScaleBitmap(mImageBuffer);
+        /*
         // run model
         final Tensor inputTensor = TensorImageUtils.bitmapToFloat32Tensor(mBitmap, new float[] {0.0f, 0.0f, 0.0f}, new float[] {1.0f, 1.0f, 1.0f});
         final Tensor outTensor = mModule.forward(IValue.from(inputTensor)).toTensor();
         final float[] outputs = outTensor.getDataAsFloatArray();
         mDeblurBitmap = floatArrayToGrayScaleBitmap(outputs);
         //
+        */
 
         runOnUiThread(() ->{
             mGallery.setEnabled(true);
             mCamera.setEnabled(true);
             mDeblur.setEnabled(true);
             mProgressbar.setVisibility(ProgressBar.INVISIBLE);
+            mProcessViewer.setVisibility(ProgressBar.INVISIBLE);
         });
     }
 
@@ -290,6 +437,9 @@ public class MainActivity extends AppCompatActivity implements Runnable{
         ByteBuffer byteBuffer = ByteBuffer.allocate(mImageView_w * mImageView_h * 4);
 
         for (int i = 0; i < mImageView_w * mImageView_h; i++){
+
+
+
             byteBuffer.put(i * 4 + 0, (byte)(int)(
                     (floatArray[i] > 1.0 ? 1.0 : floatArray[i]) * 255)
             );//(int)();

@@ -3,7 +3,7 @@
   <component name="DesignSurface">
     <option name="filePathToZoomLevelMap">
       <map>
-        <entry key="..\:/Users/34720/AndroidStudioProjects/DeblurDemo/app/src/main/res/layout/activity_main.xml" value="0.1142857142857143" />
+        <entry key="..\:/Users/34720/AndroidStudioProjects/DeblurDemo/app/src/main/res/layout/activity_main.xml" value="0.18857142857142858" />
       </map>
     </option>
   </component>
@@ -12,5 +12,8 @@
   </component>
   <component name="ProjectType">
     <option name="id" value="Android" />
+  </component>
+  <component name="SuppressKotlinCodeStyleNotification">
+    <option name="disableForAll" value="true" />
   </component>
 </project>

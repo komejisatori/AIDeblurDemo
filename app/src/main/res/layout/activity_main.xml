@@ -32,13 +32,25 @@
 
     <Button
         android:id="@+id/mDeblur"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="40dp"
+        android:layout_marginEnd="40dp"
+        android:layout_marginBottom="70dp"
+        android:text="去模糊"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <Button
+        android:id="@+id/mGrid"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="20dp"
-        android:text="去模糊"
+        android:text="等级"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toStartOf="@+id/mCamera"
-        app:layout_constraintStart_toEndOf="@+id/mGallery" />
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <ImageView
         android:id="@+id/mCanvas"
@@ -51,6 +63,24 @@
         app:layout_constraintTop_toTopOf="parent"
         app:srcCompat="@color/teal_200"
         tools:srcCompat="@color/teal_200" />
+
+    <com.example.deblurdemo.ProcessView
+        android:id="@+id/mProcessView"
+        android:layout_width="720px"
+        android:layout_height="1280px"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <com.example.deblurdemo.ResultView
+        android:id="@+id/mResultView"
+        android:layout_width="720px"
+        android:layout_height="1280px"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <ProgressBar
         android:id="@+id/mProgress"
